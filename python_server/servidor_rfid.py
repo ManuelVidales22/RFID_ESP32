@@ -1,13 +1,26 @@
 """
+MV
 SERVIDOR RFID SIMPLE - Solo muestra UID HEX y DEC
 CORREGIDO: Muestra historial completo
+VERSIÓN MEJORADA: Con CORS manual para ESP32
 """
 from flask import Flask, request, jsonify
 from datetime import datetime
-import json
+import socket
 
 app = Flask(__name__)
 registros = []
+
+# ============================================
+# CORS MANUAL - Para permitir ESP32
+# ============================================
+@app.after_request
+def add_cors_headers(response):
+    """Agrega headers CORS manualmente para ESP32"""
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    return response
 
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
@@ -440,53 +453,60 @@ def home():
 def recibir_rfid():
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({"error": "No se recibió JSON"}), 400
+        
         uid_hex = data.get('uid_hex', 'N/A')
         uid_dec = data.get('uid_dec', 'N/A')
+        device = data.get('device', 'ESP32')
         
         registro = {
             "timestamp": datetime.now().strftime("%H:%M:%S"),
             "uid_hex": uid_hex,
-            "uid_dec": uid_dec
+            "uid_dec": uid_dec,
+            "device": device
         }
         
         registros.append(registro)
         
-        # Limitar a 50 registros (más para tener buen historial)
+        # Limitar a 50 registros
         if len(registros) > 50:
             registros.pop(0)
         
         # Mostrar en consola
-        print(f"\n{'='*50}")
-        print(f"🕐 {registro['timestamp']}")
-        print(f"🎫 HEX: {uid_hex}")
-        print(f"🔢 DEC: {uid_dec}")
+        print(f"\n{'='*60}")
+        print(f"📡 DATOS RECIBIDOS DE: {device}")
+        print(f"🕐 Hora: {registro['timestamp']}")
+        print(f"🎫 UID HEX: {uid_hex}")
+        print(f"🔢 UID DEC: {uid_dec}")
         print(f"📊 Total en historial: {len(registros)}")
-        print(f"{'='*50}")
+        print(f"{'='*60}")
         
         return jsonify({
             "status": "success",
-            "message": "UID recibido",
-            "total_registros": len(registros)
+            "message": "UID recibido exitosamente",
+            "total_registros": len(registros),
+            "timestamp": registro['timestamp']
         }), 200
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ ERROR en /api/rfid: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/registros', methods=['GET'])
 def get_registros():
-    """Devuelve TODOS los registros, no solo el último"""
+    """Devuelve TODOS los registros"""
     return jsonify({
         "total": len(registros),
-        "registros": registros[::-1]  # Últimos primero para mostrar
+        "registros": registros[::-1]  # Últimos primero
     })
 
 @app.route('/api/registros_completos', methods=['GET'])
 def get_registros_completos():
-    """Endpoint alternativo que devuelve todos los registros"""
+    """Endpoint alternativo"""
     return jsonify({
         "total": len(registros),
-        "registros": registros  # En orden cronológico
+        "registros": registros
     })
 
 @app.route('/api/clear', methods=['POST'])
@@ -499,31 +519,42 @@ def clear_registros():
         "total": 0
     })
 
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Endpoint para verificar que el servidor está activo"""
+    return jsonify({
+        "status": "online",
+        "registros": len(registros),
+        "timestamp": datetime.now().strftime("%H:%M:%S")
+    })
+
 def get_server_info():
     """Obtiene información del servidor"""
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 80))
         ip = s.getsockname()[0]
-    except:
-        ip = '127.0.0.1'
-    finally:
         s.close()
-    return ip
+        return ip
+    except:
+        return '127.0.0.1'
 
 if __name__ == '__main__':
     server_ip = get_server_info()
     
-    print("\n" + "="*60)
-    print("🚀 RFID Monitor - Historial Completo")
-    print("="*60)
-    print(f"🌐 Web Interface: http://localhost:5000")
-    print(f"🌐 Red Local:     http://{server_ip}:5000")
-    print(f"📡 API Endpoint:  http://{server_ip}:5000/api/rfid")
-    print(f"📋 Historial API: http://{server_ip}:5000/api/registros")
-    print("="*60)
-    print("🎫 Esperando lecturas RFID...")
-    print("="*60 + "\n")
+    print("\n" + "="*70)
+    print("🚀 RFID MONITOR - Servidor Listo")
+    print("="*70)
+    print(f"🌐 Interfaz Web Local:  http://localhost:5000")
+    print(f"🌐 Interfaz Web Red:    http://{server_ip}:5000")
+    print(f"📡 Endpoint ESP32:      http://{server_ip}:5000/api/rfid")
+    print(f"📋 Historial API:       http://{server_ip}:5000/api/registros")
+    print(f"❤️  Health Check:        http://{server_ip}:5000/api/health")
+    print("="*70)
+    print("🎫 ESP32 debe enviar POST con JSON a: /api/rfid")
+    print("   Ejemplo: {'uid_hex': 'A1 B2 C3 D4', 'uid_dec': '2717339292'}")
+    print("="*70)
+    print("⏳ Esperando lecturas RFID desde ESP32...")
+    print("="*70 + "\n")
     
     app.run(host='0.0.0.0', port=5000, debug=False)
