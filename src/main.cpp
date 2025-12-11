@@ -8,11 +8,11 @@
 // ============================================
 // CONFIGURACIÓN WIFI - RED REAL
 // ============================================
-const char* ssid = "ESP32-RFID";          // Nombre del WiFi que TIENES
-const char* password = "12345678";        // Contraseña del WiFi
+const char* ssid = "redmi-note";          // Nombre del WiFi que TIENES
+const char* password = "124abcjeje";        // Contraseña del WiFi
 
 // Dirección del servidor (CAMBIAR según PC que uses)
-const char* serverUrl = "http://10.74.67.178:5000/api/rfid"; // IP del PC con Flask
+const char* serverUrl = "http://10.95.16.191:5000/rfid"; // IP del PC con Flask
 
 // ============================================
 // CONFIGURACIÓN RFID Y LEDs
@@ -67,9 +67,9 @@ void connectToWiFi() {
 }
 
 // ============================================
-// ENVÍO DE DATOS RFID AL SERVIDOR
+// ENVÍO DE DATOS RFID AL SERVIDOR - FORMATO SIMPLIFICADO
 // ============================================
-bool sendRFIDData(String uidHex, String uidDec) {
+bool sendRFIDData(String uid) {
     // Verificar conexión WiFi
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("⚠️  WiFi desconectado");
@@ -83,43 +83,47 @@ bool sendRFIDData(String uidHex, String uidDec) {
     http.addHeader("Content-Type", "application/json");
     http.setTimeout(5000); // Timeout de 5 segundos
     
-    // Crear JSON
-    DynamicJsonDocument doc(256);
-    doc["uid_hex"] = uidHex;
-    doc["uid_dec"] = uidDec;
-    doc["device"] = "ESP32-S3";
-    doc["timestamp"] = millis() / 1000;
-    
-    String jsonString;
-    serializeJson(doc, jsonString);
+    // Crear JSON en formato simplificado: {"rfid":"UID_AQUI"}
+    String body = "{\"rfid\":\"" + uid + "\"}";
     
     // Mostrar info de envío
     Serial.println("\n📤 ENVIANDO DATOS:");
     Serial.print("   Destino: ");
     Serial.println(serverUrl);
     Serial.print("   Datos: ");
-    Serial.println(jsonString);
+    Serial.println(body);
     
     // Enviar POST
-    int httpCode = http.POST(jsonString);
+    int httpCode = http.POST(body);
     
     // Procesar respuesta
     if (httpCode > 0) {
-        if (httpCode == HTTP_CODE_OK) {
+        Serial.printf("📥 HTTP Code: %d\n", httpCode);
+        
+        if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED) {
             String response = http.getString();
             Serial.print("✅ ÉXITO - Respuesta: ");
             Serial.println(response);
-            http.end();
             
             // LED de RFID parpadea rápido (éxito)
             if (LED_RFID != -1) {
                 digitalWrite(LED_RFID, HIGH);
                 delay(100);
                 digitalWrite(LED_RFID, LOW);
+                delay(50);
+                digitalWrite(LED_RFID, HIGH);
+                delay(100);
+                digitalWrite(LED_RFID, LOW);
             }
+            http.end();
             return true;
         } else {
-            Serial.printf("⚠️  HTTP Code: %d\n", httpCode);
+            // Mostrar cuerpo de error si existe
+            String errorResponse = http.getString();
+            if (errorResponse.length() > 0) {
+                Serial.print("📄 Respuesta del servidor: ");
+                Serial.println(errorResponse);
+            }
         }
     } else {
         Serial.printf("❌ Error HTTP: %s\n", http.errorToString(httpCode).c_str());
@@ -131,9 +135,9 @@ bool sendRFIDData(String uidHex, String uidDec) {
     if (LED_RFID != -1) {
         for(int i = 0; i < 3; i++) {
             digitalWrite(LED_RFID, HIGH);
-            delay(100);
+            delay(300);
             digitalWrite(LED_RFID, LOW);
-            delay(100);
+            delay(200);
         }
     }
     
@@ -225,38 +229,31 @@ void loop() {
             digitalWrite(LED_RFID, HIGH);
         }
         
-        // EXTRAER UID HEX
+        // EXTRAER UID HEX (formato compacto sin espacios)
         String uidHex = "";
         for (byte i = 0; i < mfrc522.uid.size; i++) {
             if (mfrc522.uid.uidByte[i] < 0x10) uidHex += "0";
             uidHex += String(mfrc522.uid.uidByte[i], HEX);
-            if (i < mfrc522.uid.size - 1) uidHex += " ";
         }
         uidHex.toUpperCase();
-        
-        // EXTRAER UID DEC
-        unsigned long uidDec = 0;
-        for (byte i = 0; i < mfrc522.uid.size; i++) {
-            uidDec = (uidDec << 8) | mfrc522.uid.uidByte[i];
-        }
         
         // MOSTRAR EN MONITOR SERIAL
         Serial.println("\n" + String(40, '═'));
         Serial.println("🎫 TARJETA RFID DETECTADA");
         Serial.println(String(40, '═'));
-        Serial.print("🔑 UID HEX: ");
+        Serial.print("🔑 UID: ");
         Serial.println(uidHex);
-        Serial.print("🔢 UID DEC: ");
-        Serial.println(uidDec);
-        Serial.print("⏰ Hora: ");
+        Serial.print("⏰ Tiempo desde inicio: ");
         Serial.print(millis() / 1000);
         Serial.println(" segundos");
         
-        // ENVIAR DATOS AL SERVIDOR
-        bool success = sendRFIDData(uidHex, String(uidDec));
+        // ENVIAR DATOS AL SERVIDOR - FORMATO SIMPLIFICADO
+        bool success = sendRFIDData(uidHex);
         
+        // Mostrar resultado
+        Serial.print("📤 Estado: ");
         if (success) {
-            Serial.println("✅ Datos enviados al servidor");
+            Serial.println("✅ Datos enviados correctamente");
         } else {
             Serial.println("❌ Error al enviar datos");
         }
